@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import axiosInstance from '../axiosInstance';
+import profileService from '../services/profileService';
 
 function AddMoviePage() {
   const [isSuperuser, setIsSuperuser] = useState(false);
@@ -25,7 +26,7 @@ function AddMoviePage() {
   useEffect(() => {
     const verifySuperuser = async () => {
       try {
-        const res = await axiosInstance.get('/api/v1/profile/');
+        const res = await profileService.getProfile();
         const isSuper = Boolean(res.data.is_superuser || res.data.is_staff);
         setIsSuperuser(isSuper);
         localStorage.setItem('isSuperuser', isSuper ? 'true' : 'false');

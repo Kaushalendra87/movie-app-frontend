@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 
 const FOLDER_POSTERS = [
   '/movie_poster/dune.jpg',

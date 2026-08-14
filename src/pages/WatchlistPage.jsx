@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axiosInstance from '../axiosInstance';
+import getImageUrl from '../utils/getImageUrl';
 
 function WatchlistPage() {
   const [watchlistItems, setWatchlistItems] = useState([]);
@@ -11,37 +12,43 @@ function WatchlistPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('newest');
 
-  const fetchData = async () => {
-    setLoading(true);
-    setErrorMessage('');
-    try {
-      const res = await axiosInstance.get('/api/v1/watchlist/');
-      const data = res?.data;
-      const items = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.results)
-          ? data.results
-          : [];
-      setWatchlistItems(items);
-    } catch (err) {
-      console.error('Watchlist fetch error:', err);
-      setErrorMessage('Could not load your watchlist right now.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    let isMounted = true;
+
+    const fetchData = async () => {
+      setLoading(true);
+      setErrorMessage('');
+      try {
+        const res = await axiosInstance.get('/api/v1/watchlist/');
+        if (!isMounted) return;
+        const data = res?.data;
+        const items = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.results)
+            ? data.results
+            : [];
+        setWatchlistItems(items);
+      } catch (err) {
+        if (isMounted) {
+          console.error('Watchlist fetch error:', err);
+          setErrorMessage('Could not load your watchlist right now.');
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchData();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Poster URL is now absolute from the backend, but keep fallback just in case
-  const getPosterUrl = (poster) => {
-    if (!poster) return null;
-    if (poster.startsWith('http://') || poster.startsWith('https://')) return poster;
-    const base = import.meta.env.VITE_BACKEND_BASER_API || 'http://127.0.0.1:8000';
-    return `${base}${poster.startsWith('/') ? poster : `/${poster}`}`;
-  };
+  // Use centralized logic to resolve poster URLs (Cloudinary or backend)
+  const getPosterUrl = (poster) => getImageUrl(poster);
 
   // Split comma-separated genres into individual pills
   const splitGenres = (genreStr) => {

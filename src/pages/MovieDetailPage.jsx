@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import axiosInstance from '../axiosInstance';
+import getImageUrl from '../utils/getImageUrl';
 
 function MovieDetailPage() {
   const { movieId } = useParams();
@@ -38,82 +39,93 @@ function MovieDetailPage() {
   const [deletingMovie, setDeletingMovie] = useState(false);
   const isSuperuser = localStorage.getItem('isSuperuser') === 'true';
 
-  const fetchMovieDetails = async () => {
-    try {
-      setLoading(true);
-      const requests = [
-        axiosInstance.get(`/api/v1/movies/${movieId}/`),
-        axiosInstance.get('/api/v1/ratings/'),
-        axiosInstance.get(`/api/v1/reviews/?movie=${movieId}`),
-      ];
-
-      if (isAuthenticated) {
-        requests.push(axiosInstance.get('/api/v1/watchlist/'));
-      }
-
-      const results = await Promise.all(requests);
-      const movieData = results[0].data;
-      const ratingsData = results[1].data;
-      const reviewsData = results[2].data;
-      const watchlistData = isAuthenticated && results[3] ? results[3].data : [];
-
-      setMovie(movieData);
-      setRatings(ratingsData);
-      setReviews(reviewsData);
-      setWatchlistItems(watchlistData);
-
-      const storedUsername = localStorage.getItem('profileName');
-      if (storedUsername) {
-        const movieRatings = ratingsData.filter((r) => r.movie === Number(movieId));
-        const foundRating = movieRatings.find((r) => r.username === storedUsername || r.user);
-        if (foundRating) {
-          setUserRatingObj(foundRating);
-          setSelectedRating(foundRating.rating);
-        }
-      }
-
-      const foundWatchlist = watchlistData.find((w) => w.movie === Number(movieId));
-      setWatchlistItem(foundWatchlist || null);
-
-      if (storedUsername) {
-        const foundRev = reviewsData.find((rev) => rev.username === storedUsername);
-        if (foundRev) {
-          setUserReviewObj(foundRev);
-        }
-      }
-    } catch {
-      setErrorMessage('Unable to load movie details right now.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    let isMounted = true;
+
+    const fetchMovieDetails = async () => {
+      try {
+        setLoading(true);
+        const requests = [
+          axiosInstance.get(`/api/v1/movies/${movieId}/`),
+          axiosInstance.get('/api/v1/ratings/'),
+          axiosInstance.get(`/api/v1/reviews/?movie=${movieId}`),
+        ];
+
+        if (isAuthenticated) {
+          requests.push(axiosInstance.get('/api/v1/watchlist/'));
+        }
+
+        const results = await Promise.all(requests);
+        if (!isMounted) return;
+
+        const movieData = results[0].data;
+        const ratingsData = Array.isArray(results[1].data)
+          ? results[1].data
+          : results[1].data?.results || [];
+        const reviewsData = Array.isArray(results[2].data)
+          ? results[2].data
+          : results[2].data?.results || [];
+        const rawWatchlist = isAuthenticated && results[3] ? results[3].data : [];
+        const watchlistData = Array.isArray(rawWatchlist)
+          ? rawWatchlist
+          : rawWatchlist?.results || [];
+
+        setMovie(movieData);
+        setRatings(ratingsData);
+        setReviews(reviewsData);
+        setWatchlistItems(watchlistData);
+
+        const storedUsername = localStorage.getItem('profileName');
+        if (storedUsername) {
+          const movieRatings = ratingsData.filter((r) => r.movie === Number(movieId));
+          const foundRating = movieRatings.find((r) => r.username === storedUsername || r.user);
+          if (foundRating) {
+            setUserRatingObj(foundRating);
+            setSelectedRating(foundRating.rating);
+          }
+        }
+
+        const foundWatchlist = watchlistData.find((w) => w.movie === Number(movieId));
+        setWatchlistItem(foundWatchlist || null);
+
+        if (storedUsername) {
+          const foundRev = reviewsData.find((rev) => rev.username === storedUsername);
+          if (foundRev) {
+            setUserReviewObj(foundRev);
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setErrorMessage('Unable to load movie details right now.');
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchMovieDetails();
+
+    return () => {
+      isMounted = false;
+    };
   }, [movieId, isAuthenticated]);
 
   const averageRating = useMemo(() => {
+    if (movie?.average_rating && movie.average_rating > 0) {
+      return { score: `${movie.average_rating} / 5`, count: movie.review_count || 0 };
+    }
     const movieRatings = ratings.filter((r) => r.movie === Number(movieId));
     if (!movieRatings.length) return { score: 'No ratings', count: 0 };
     const avg = movieRatings.reduce((sum, r) => sum + r.rating, 0) / movieRatings.length;
     return { score: `${avg.toFixed(1)} / 5`, count: movieRatings.length };
-  }, [ratings, movieId]);
+  }, [ratings, movieId, movie]);
 
-  const getPosterUrl = (poster) => {
-    if (!poster) return null;
-    if (poster.startsWith('http://') || poster.startsWith('https://')) return poster;
-    const backendBaseUrl = import.meta.env.VITE_BACKEND_BASER_API || 'http://127.0.0.1:8000';
-    return `${backendBaseUrl}${poster.startsWith('/') ? poster : `/${poster}`}`;
-  };
+  const getPosterUrl = (poster) => getImageUrl(poster);
 
   const getReviewAvatarUrl = (rev) => {
-    if (rev?.profile_pic) {
-      if (rev.profile_pic.startsWith('http://') || rev.profile_pic.startsWith('https://')) {
-        return rev.profile_pic;
-      }
-      const backendBaseUrl = import.meta.env.VITE_BACKEND_BASER_API || 'http://127.0.0.1:8000';
-      return `${backendBaseUrl}${rev.profile_pic.startsWith('/') ? rev.profile_pic : `/${rev.profile_pic}`}`;
-    }
+    if (rev?.profile_pic) return getImageUrl(rev.profile_pic);
     if (localStorage.getItem('profileName') === rev.username && localStorage.getItem('profileImage')) {
       return localStorage.getItem('profileImage');
     }

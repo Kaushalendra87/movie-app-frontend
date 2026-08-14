@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axiosInstance from '../axiosInstance';
+import profileService from '../services/profileService';
+import getImageUrl from '../utils/getImageUrl';
 
 function MoviesPage() {
   const navigate = useNavigate();
@@ -36,7 +38,7 @@ function MoviesPage() {
 
         if (isAuthenticated) {
           requests.push(axiosInstance.get('/api/v1/watchlist/'));
-          requests.push(axiosInstance.get('/api/v1/profile/'));
+          requests.push(profileService.getProfile());
         }
 
         const results = await Promise.allSettled(requests);
@@ -114,15 +116,13 @@ function MoviesPage() {
     });
   }, [movies, searchTerm, selectedGenre]);
 
-  const getPosterUrl = (poster) => {
-    if (!poster) return null;
-    if (poster.startsWith('http://') || poster.startsWith('https://')) return poster;
-    const backendBaseUrl = import.meta.env.VITE_BACKEND_BASER_API || 'http://127.0.0.1:8000';
-    return `${backendBaseUrl}${poster.startsWith('/') ? poster : `/${poster}`}`;
-  };
+  const getPosterUrl = (poster) => getImageUrl(poster);
 
-  const getAverageRating = (movieId) => {
-    const movieRatings = ratings.filter((r) => r.movie === movieId);
+  const getAverageRating = (movie) => {
+    if (typeof movie?.average_rating === 'number' && movie.average_rating > 0) {
+      return `${movie.average_rating} ★`;
+    }
+    const movieRatings = ratings.filter((r) => r.movie === movie?.id);
     if (!movieRatings.length) return 'No ratings';
     const avg = movieRatings.reduce((sum, r) => sum + r.rating, 0) / movieRatings.length;
     return `${avg.toFixed(1)} ★`;
@@ -284,7 +284,7 @@ function MoviesPage() {
                     <div className="movie-poster movie-poster--placeholder">🎬</div>
                   )}
 
-                  <span className="movie-rating-badge">{getAverageRating(movie.id)}</span>
+                  <span className="movie-rating-badge">{getAverageRating(movie)}</span>
 
                   <button
                     type="button"

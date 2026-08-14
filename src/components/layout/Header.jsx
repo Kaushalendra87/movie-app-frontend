@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import axiosInstance from '../../axiosInstance';
+import getImageUrl from '../../utils/getImageUrl';
+import profileService from '../../services/profileService';
 
 function Header() {
   const navigate = useNavigate();
@@ -11,34 +13,74 @@ function Header() {
   const [isSuperuser, setIsSuperuser] = useState(localStorage.getItem('isSuperuser') === 'true');
   const [watchlistCount, setWatchlistCount] = useState(0);
 
-  const fetchProfileAndWatchlist = async () => {
-    if (!isAuthenticated) return;
-    try {
-      const [profileRes, watchlistRes] = await Promise.allSettled([
-        axiosInstance.get('/api/v1/profile/'),
-        axiosInstance.get('/api/v1/watchlist/'),
-      ]);
-
-      if (profileRes.status === 'fulfilled') {
-        const prof = profileRes.value.data;
-        const isSuper = Boolean(prof.is_superuser || prof.is_staff);
-        setIsSuperuser(isSuper);
-        localStorage.setItem('isSuperuser', isSuper ? 'true' : 'false');
-      }
-
-      if (watchlistRes.status === 'fulfilled') {
-        setWatchlistCount(Array.isArray(watchlistRes.value.data) ? watchlistRes.value.data.length : 0);
-      }
-    } catch {
-      // ignore token error or fetch error in header
-    }
-  };
-
   useEffect(() => {
+    let isMounted = true;
+
     const syncProfileInfo = () => {
       setProfileImage(localStorage.getItem('profileImage') || '');
       setProfileName(localStorage.getItem('profileName') || 'U');
       setIsSuperuser(localStorage.getItem('isSuperuser') === 'true');
+    };
+
+    const fetchProfileAndWatchlist = async () => {
+      if (!isAuthenticated) return;
+      try {
+        const [profileRes, watchlistRes] = await Promise.allSettled([
+          profileService.getProfile(),
+          axiosInstance.get('/api/v1/watchlist/'),
+        ]);
+
+        if (isMounted && profileRes.status === 'fulfilled') {
+          const prof = profileRes.value.data;
+          const isSuper = Boolean(prof.is_superuser || prof.is_staff);
+          setIsSuperuser(isSuper);
+          localStorage.setItem('isSuperuser', isSuper ? 'true' : 'false');
+
+          // Ensure profile name is available immediately
+          if (prof.username) {
+            setProfileName(prof.username);
+            localStorage.setItem('profileName', prof.username);
+          }
+
+          // Preload profile image (use Cloudinary URL directly if present)
+          const rawPic = prof.profile_pic;
+          if (rawPic) {
+            const imgUrl = getImageUrl(rawPic);
+            if (imgUrl) {
+              const img = new Image();
+              img.src = imgUrl;
+              img.onload = () => {
+                if (!isMounted) return;
+                setProfileImage(imgUrl);
+                localStorage.setItem('profileImage', imgUrl);
+                window.dispatchEvent(new Event('profile-updated'));
+              };
+              img.onerror = () => {
+                // keep existing/default avatar on error
+                localStorage.removeItem('profileImage');
+              };
+            }
+          } else {
+            // No profile pic: ensure localStorage is cleared
+            localStorage.removeItem('profileImage');
+            setProfileImage('');
+          }
+        }
+
+        if (isMounted && watchlistRes.status === 'fulfilled') {
+          const data = watchlistRes.value.data;
+          const count = Array.isArray(data)
+            ? data.length
+            : typeof data?.count === 'number'
+              ? data.count
+              : Array.isArray(data?.results)
+                ? data.results.length
+                : 0;
+          setWatchlistCount(count);
+        }
+      } catch {
+        // ignore fetch error in header
+      }
     };
 
     syncProfileInfo();
@@ -46,12 +88,17 @@ function Header() {
       fetchProfileAndWatchlist();
     }
 
+    const handleWatchlistUpdate = () => {
+      fetchProfileAndWatchlist();
+    };
+
     window.addEventListener('profile-updated', syncProfileInfo);
-    window.addEventListener('watchlist-updated', fetchProfileAndWatchlist);
+    window.addEventListener('watchlist-updated', handleWatchlistUpdate);
 
     return () => {
+      isMounted = false;
       window.removeEventListener('profile-updated', syncProfileInfo);
-      window.removeEventListener('watchlist-updated', fetchProfileAndWatchlist);
+      window.removeEventListener('watchlist-updated', handleWatchlistUpdate);
     };
   }, [location.pathname, isAuthenticated]);
 
@@ -61,6 +108,11 @@ function Header() {
     localStorage.removeItem('profileName');
     localStorage.removeItem('profileImage');
     localStorage.removeItem('isSuperuser');
+    // Clear any in-memory cached profile so a subsequent login fetches the
+    // correct user's profile rather than returning stale data.
+    if (profileService && typeof profileService.clearProfileCache === 'function') {
+      profileService.clearProfileCache();
+    }
     navigate('/login');
   };
 

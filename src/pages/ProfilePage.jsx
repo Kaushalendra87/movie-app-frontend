@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axiosInstance from '../axiosInstance';
+import profileService from '../services/profileService';
+import getImageUrl from '../utils/getImageUrl';
 
 const emptyForm = {
   bio: '',
@@ -25,73 +27,87 @@ function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 
-  const baseURL = import.meta.env.VITE_BACKEND_BASER_API || 'http://127.0.0.1:8000';
-
-  const syncProfileToHeader = (data) => {
+  const syncProfileToHeader = useCallback((data) => {
     if (data?.username) {
       localStorage.setItem('profileName', data.username);
     }
     if (data?.profile_pic) {
-      const imageUrl = data.profile_pic.startsWith('http')
-        ? data.profile_pic
-        : `${baseURL}${data.profile_pic}`;
-      localStorage.setItem('profileImage', imageUrl);
+      localStorage.setItem('profileImage', getImageUrl(data.profile_pic));
     } else {
       localStorage.removeItem('profileImage');
     }
     window.dispatchEvent(new Event('profile-updated'));
-  };
-
-  const fetchProfileAndUserData = async () => {
-    try {
-      setLoading(true);
-      const [profileRes, watchlistRes, reviewsRes, moviesRes] = await Promise.all([
-        axiosInstance.get('/api/v1/profile/'),
-        axiosInstance.get('/api/v1/watchlist/'),
-        axiosInstance.get('/api/v1/reviews/'),
-        axiosInstance.get('/api/v1/movies/'),
-      ]);
-
-      const profData = profileRes.data;
-      setProfile(profData);
-      syncProfileToHeader(profData);
-
-      setFormData({
-        bio: profData.bio || '',
-        date_of_birth: profData.date_of_birth || '',
-        location: profData.location || '',
-        favourite_genre: profData.favourite_genre || '',
-      });
-
-      setWatchlistItems(watchlistRes.data || []);
-
-      const map = {};
-      moviesRes.data.forEach((m) => {
-        map[m.id] = m;
-      });
-      setMoviesMap(map);
-
-      // Filter reviews written by current user
-      const myRevs = (reviewsRes.data || []).filter(
-        (rev) => rev.username === profData.username || rev.user === profData.id
-      );
-      setUserReviews(myRevs);
-    } catch (error) {
-      if (error.response?.status === 401) {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        navigate('/login');
-        return;
-      }
-      setMessage({ type: 'error', text: 'We could not load your profile right now.' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const fetchProfileAndUserData = async () => {
+      try {
+        setLoading(true);
+        const [profileRes, watchlistRes, reviewsRes, moviesRes] = await Promise.all([
+          profileService.getProfile(),
+          axiosInstance.get('/api/v1/watchlist/'),
+          axiosInstance.get('/api/v1/reviews/'),
+          axiosInstance.get('/api/v1/movies/'),
+        ]);
+
+        if (!isMounted) return;
+
+        const profData = profileRes.data;
+        setProfile(profData);
+        syncProfileToHeader(profData);
+
+        setFormData({
+          bio: profData.bio || '',
+          date_of_birth: profData.date_of_birth || '',
+          location: profData.location || '',
+          favourite_genre: profData.favourite_genre || '',
+        });
+
+        const watchlistList = Array.isArray(watchlistRes.data)
+          ? watchlistRes.data
+          : watchlistRes.data?.results || [];
+        setWatchlistItems(watchlistList);
+
+        const moviesList = Array.isArray(moviesRes.data)
+          ? moviesRes.data
+          : moviesRes.data?.results || [];
+        const map = {};
+        moviesList.forEach((m) => {
+          map[m.id] = m;
+        });
+        setMoviesMap(map);
+
+        const reviewsList = Array.isArray(reviewsRes.data)
+          ? reviewsRes.data
+          : reviewsRes.data?.results || [];
+        const myRevs = reviewsList.filter(
+          (rev) => rev.username === profData.username || rev.user === profData.id
+        );
+        setUserReviews(myRevs);
+      } catch (error) {
+        if (!isMounted) return;
+        if (error.response?.status === 401) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          navigate('/login');
+          return;
+        }
+        setMessage({ type: 'error', text: 'We could not load your profile right now.' });
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchProfileAndUserData();
-  }, [navigate]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate, syncProfileToHeader]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -119,6 +135,8 @@ function ProfilePage() {
       });
 
       setProfile(response.data);
+      // Update cached profile so other parts of the app reuse latest data
+      try { profileService.setProfile(response.data); } catch (e) {}
       syncProfileToHeader(response.data);
       setSelectedFile(null);
       setIsEditing(false);
@@ -153,11 +171,7 @@ function ProfilePage() {
     }
   };
 
-  const imageSrc = profile?.profile_pic
-    ? profile.profile_pic.startsWith('http')
-      ? profile.profile_pic
-      : `${baseURL}${profile.profile_pic}`
-    : null;
+  const imageSrc = getImageUrl(profile?.profile_pic);
 
   return (
     <section className="profile-shell">

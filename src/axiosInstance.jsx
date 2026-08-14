@@ -11,9 +11,15 @@ const axiosInstance = axios.create({
 
 axiosInstance.interceptors.request.use(
   (config) => {
-    const accessToken = localStorage.getItem('accessToken');
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`;
+    // Don't attach existing Authorization header when obtaining or
+    // refreshing tokens — posting to the token endpoints must use
+    // raw credentials so we avoid sending stale tokens.
+    const isTokenEndpoint = String(config.url || '').includes('/api/v1/token/');
+    if (!isTokenEndpoint) {
+      const accessToken = localStorage.getItem('accessToken');
+      if (accessToken) {
+        config.headers.Authorization = `Bearer ${accessToken}`;
+      }
     }
     return config;
   },
@@ -24,11 +30,16 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest?.retry) {
-      originalRequest.retry = true;
+    if (error.response?.status === 401 && !originalRequest?._retry) {
+      originalRequest._retry = true;
       const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        localStorage.removeItem('accessToken');
+        return Promise.reject(error);
+      }
+
       try {
-        const response = await axiosInstance.post('/api/v1/token/refresh/', { refresh: refreshToken });
+        const response = await axios.post(`${baseURL}/api/v1/token/refresh/`, { refresh: refreshToken });
         localStorage.setItem('accessToken', response.data.access);
         originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
         return axiosInstance(originalRequest);

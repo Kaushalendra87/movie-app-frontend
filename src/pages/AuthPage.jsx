@@ -36,8 +36,20 @@ function AuthPage() {
           password: formData.password,
         });
 
+        // Clear any existing auth/profile state to avoid reusing another
+        // user's tokens or profile data, then store the new tokens.
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('profileName');
+        localStorage.removeItem('profileImage');
+        localStorage.removeItem('isSuperuser');
+
         localStorage.setItem('accessToken', response.data.access);
         localStorage.setItem('refreshToken', response.data.refresh);
+
+        // Trigger components to refresh profile/watchlist state.
+        window.dispatchEvent(new Event('profile-updated'));
+
         navigate('/movies');
       } else {
         if (formData.password !== formData.confirmPassword) {

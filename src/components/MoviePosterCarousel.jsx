@@ -1,4 +1,3 @@
-import React from 'react';
 
 const posterData = [
   { id: 1, title: 'Dune: Part Two', image: '/movie_poster/dune.jpg', genre: 'Sci-Fi • Epic', rating: '8.6' },
